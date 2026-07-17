@@ -1,0 +1,15 @@
+{
+  "name": "vector-autonomous-trading-cockpit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Live crypto market dashboard with guarded Binance futures execution and an optional AI decision layer.",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.mjs",
+    "dev": "node --watch server/index.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
