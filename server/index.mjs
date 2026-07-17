@@ -12,6 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 loadDotEnv(path.join(ROOT, '.env'));
 
 const PORT = Number(process.env.PORT || 4173);
+const HOST = process.env.HOST || '127.0.0.1';
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 8 * 60 * 60 * 1000);
 const publicDir = path.join(ROOT, 'public');
 const config = initialConfig();
@@ -433,8 +434,8 @@ const server = http.createServer(async (request, response) => {
   catch (error) { sendJson(response, error.status || 500, { error: cleanError(error) }); }
 });
 
-server.listen(PORT, () => {
-  console.log(`Vector trading cockpit listening on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Vector trading cockpit listening on http://${HOST}:${PORT}`);
   console.log(`Live execution: ${isLiveTradingEnabled(config, exchange.configured) ? 'ENABLED' : 'disabled'}`);
   if (!authConfigured() && authRequired()) console.warn('Set APP_USERNAME and APP_PASSWORD before using protected controls.');
 });
