@@ -22,6 +22,16 @@ async function api(path, options = {}) {
 }
 
 function setFeedStatus(kind, text) { const node = $('#feedStatus'); node.className = `pill ${kind || 'pill-muted'}`; node.replaceChildren(makeElement('i'), document.createTextNode(text)); }
+function renderWallet(address, chainId) {
+  if (!address) return;
+  const numericChainId = typeof chainId === 'string' && chainId.startsWith('0x') ? parseInt(chainId, 16) : Number(chainId);
+  state.wallet = { address, chainId: numericChainId };
+  setText('#walletAddress', address);
+  setText('#walletChain', `Chain ${Number.isFinite(numericChainId) ? numericChainId : '—'}`);
+  $('#walletBadge').className = 'badge badge-live';
+  $('#walletBadge').textContent = 'CONNECTED';
+  $('#walletButton').textContent = shortAddress(address);
+}
 function renderHealth(health) {
   state.health = health;
   const live = health.liveEnabled;
@@ -34,6 +44,7 @@ function renderHealth(health) {
   const liveBadge = $('#liveBadge'); liveBadge.className = `badge ${live ? 'badge-live' : kill ? 'badge-danger' : 'badge-muted'}`; liveBadge.textContent = kill ? 'KILL SWITCH' : live ? 'LIVE READY' : 'LOCKED';
   const aiBadge = $('#aiBadge'); aiBadge.className = `badge ${health.aiConfigured ? 'badge-live' : 'badge-muted'}`; aiBadge.textContent = health.aiConfigured ? 'READY' : 'NOT CONFIGURED';
   $('#executeButton').disabled = !live;
+  if (health.walletAddress) renderWallet(health.walletAddress, health.walletChainId);
 }
 
 function renderMarket(market) {
@@ -145,10 +156,23 @@ async function loadPrivate() {
 
 async function loadHealth() { try { renderHealth(await api('/api/health')); } catch { setText('#systemCard strong', 'Server unavailable'); } }
 
-async function login(event) {
-  event.preventDefault(); setText('#loginError', '');
-  try { await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#loginUsername').value, password: $('#loginPassword').value }) }); await loadHealth(); await loadPrivate(); }
-  catch (error) { setText('#loginError', error.message); }
+async function walletLogin() {
+  setText('#loginError', '');
+  if (!window.ethereum) { setText('#loginError', 'No injected EVM wallet was detected. Install MetaMask, Coinbase Wallet, or Rabby.'); return; }
+  const button = $('#loginWalletButton'); if (button) { button.disabled = true; button.textContent = 'Waiting for wallet…'; }
+  try {
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    const address = accounts?.[0];
+    const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
+    const chainId = parseInt(chainIdHex, 16);
+    const challenge = await api('/api/auth/nonce', { method: 'POST', body: JSON.stringify({ address, chainId }) });
+    if (button) button.textContent = 'Sign message in wallet…';
+    const signature = await window.ethereum.request({ method: 'personal_sign', params: [challenge.message, address] });
+    const session = await api('/api/auth/wallet', { method: 'POST', body: JSON.stringify({ address, chainId, nonce: challenge.nonce, message: challenge.message, signature }) });
+    renderWallet(session.address, session.chainId);
+    await loadHealth(); await loadPrivate();
+  } catch (error) { setText('#loginError', error.message || 'Wallet sign-in was rejected.'); }
+  finally { if (button) { button.disabled = false; button.textContent = 'Connect wallet to continue'; } }
 }
 
 function formOrder() { return { symbol: $('#orderSymbol').value, side: $('#orderSide').value, type: $('#orderType').value, quantity: Number($('#orderQuantity').value), price: $('#orderType').value === 'LIMIT' ? Number($('#orderPrice').value) : null, leverage: Number($('#orderLeverage').value), stopLoss: $('#orderStop').value ? Number($('#orderStop').value) : null, takeProfit: $('#orderTake').value ? Number($('#orderTake').value) : null }; }
@@ -177,14 +201,17 @@ async function runAgent() {
 async function toggleKillSwitch() { const enabled = !state.config?.killSwitch; const verb = enabled ? 'Enable kill switch? This cancels open orders for the allowlisted symbols.' : 'Disable kill switch and allow validated orders again?'; if (!confirm(verb)) return; try { const result = await api('/api/kill-switch', { method: 'POST', body: JSON.stringify({ enabled }) }); state.config.killSwitch = result.killSwitch; renderConfig(state.config); } catch (error) { showPreview(error.message, true); } }
 async function refreshPrivate() { try { renderAccount(await api('/api/account')); renderAudit((await api('/api/audit')).events); } catch (error) { if (error.status === 401) $('#loginOverlay').classList.remove('hidden'); } }
 
-async function connectWallet() { if (!window.ethereum) { setText('#walletAddress', 'No injected EVM wallet found'); return; } try { const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }); const chainId = await window.ethereum.request({ method: 'eth_chainId' }); state.wallet = { address: accounts[0], chainId }; setText('#walletAddress', accounts[0]); setText('#walletChain', `Chain ${parseInt(chainId, 16)}`); $('#walletBadge').className = 'badge badge-live'; $('#walletBadge').textContent = 'CONNECTED'; $('#walletButton').textContent = shortAddress(accounts[0]); } catch (error) { setText('#walletAddress', error.message || 'Wallet connection rejected'); } }
+async function handleWalletContextChange() { try { await api('/api/auth/logout', { method: 'POST' }); } catch {} location.reload(); }
 
 function wire() {
-  $('#loginForm').addEventListener('submit', login); $('#orderForm').addEventListener('submit', submitOrder); $('#previewButton').addEventListener('click', previewOrder); $('#runAgentButton').addEventListener('click', runAgent); $('#killSwitchButton').addEventListener('click', toggleKillSwitch); $('#walletButton').addEventListener('click', connectWallet); $('#refreshAccountButton').addEventListener('click', refreshPrivate); $('#refreshAuditButton').addEventListener('click', refreshPrivate); $('#logoutButton').addEventListener('click', async () => { await api('/api/auth/logout', { method: 'POST' }); location.reload(); });
+  $('#loginWalletButton').addEventListener('click', walletLogin); $('#orderForm').addEventListener('submit', submitOrder); $('#previewButton').addEventListener('click', previewOrder); $('#runAgentButton').addEventListener('click', runAgent); $('#killSwitchButton').addEventListener('click', toggleKillSwitch); $('#walletButton').addEventListener('click', walletLogin); $('#refreshAccountButton').addEventListener('click', refreshPrivate); $('#refreshAuditButton').addEventListener('click', refreshPrivate); $('#logoutButton').addEventListener('click', async () => { await api('/api/auth/logout', { method: 'POST' }); location.reload(); });
   $('#orderType').addEventListener('change', () => show($('#limitPriceRow'), $('#orderType').value === 'LIMIT'));
   document.querySelectorAll('[data-side]').forEach((button) => button.addEventListener('click', () => { document.querySelectorAll('[data-side]').forEach((item) => item.classList.remove('active')); button.classList.add('active'); $('#orderSide').value = button.dataset.side; }));
   window.addEventListener('resize', drawChart);
-  if (window.ethereum) { window.ethereum.on?.('accountsChanged', (accounts) => { if (accounts[0]) { setText('#walletAddress', accounts[0]); setText('#walletButton', shortAddress(accounts[0])); } else { setText('#walletAddress', 'No wallet connected'); } }); }
+  if (window.ethereum) {
+    window.ethereum.on?.('accountsChanged', (accounts) => { if (state.wallet?.address && accounts[0]?.toLowerCase() !== state.wallet.address.toLowerCase()) handleWalletContextChange(); else if (accounts[0]) renderWallet(accounts[0], state.wallet?.chainId); else handleWalletContextChange(); });
+    window.ethereum.on?.('chainChanged', () => { if (state.wallet?.address) handleWalletContextChange(); });
+  }
 }
 
 async function boot() { wire(); await loadHealth(); await loadMarket(); await loadPrivate(); setInterval(loadMarket, 30_000); setInterval(refreshPrivate, 20_000); }

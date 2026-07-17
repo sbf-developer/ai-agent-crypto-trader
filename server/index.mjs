@@ -7,6 +7,7 @@ import { loadDotEnv, randomToken, parseCookies, sessionCookie, csrfCookie, clear
 import { BinanceClient } from './binance.mjs';
 import { initialConfig, validateConfigPatch, validateOrder, isLiveTradingEnabled, number } from './risk.mjs';
 import { getAiDecision } from './agent.mjs';
+import { createWalletChallenge, normalizeWalletAddress, verifyWalletChallenge } from './wallet.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 loadDotEnv(path.join(ROOT, '.env'));
@@ -36,10 +37,6 @@ function logEvent(type, detail = {}) {
 
 function authRequired() {
   return !(process.env.NODE_ENV !== 'production' && process.env.AUTH_DISABLED === 'true');
-}
-
-function authConfigured() {
-  return Boolean(process.env.APP_USERNAME && process.env.APP_PASSWORD);
 }
 
 function cleanError(error) {
@@ -85,7 +82,7 @@ async function bodyJson(request) {
 }
 
 function getSession(request) {
-  if (!authRequired()) return { id: 'dev-bypass', username: 'dev' };
+  if (!authRequired()) return { id: 'dev-bypass', address: null, chainId: null };
   const token = parseCookies(request.headers.cookie).vector_session;
   const session = token ? sessions.get(token) : null;
   if (!session || session.expiresAt < Date.now()) {
@@ -113,6 +110,12 @@ function requireCsrf(request, response, session) {
     return false;
   }
   return true;
+}
+
+function requestOrigin(request) {
+  if (process.env.PUBLIC_APP_ORIGIN) return process.env.PUBLIC_APP_ORIGIN.replace(/\/$/, '');
+  const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+  return `${protocol}://${request.headers.host || `${HOST}:${PORT}`}`;
 }
 
 function rateLimit(request, response, bucket = 'default', limit = 60, windowMs = 60_000) {
@@ -167,11 +170,14 @@ async function accountSnapshot() {
 
 function statusPayload(request) {
   const liveEnabled = isLiveTradingEnabled(config, exchange.configured);
+  const session = getSession(request);
   return {
     ok: true,
     authRequired: authRequired(),
-    authConfigured: authConfigured(),
-    authenticated: Boolean(getSession(request)),
+    walletAuth: true,
+    authenticated: Boolean(session),
+    walletAddress: session?.address || null,
+    walletChainId: session?.chainId || null,
     exchangeConfigured: exchange.configured,
     aiConfigured: Boolean(process.env.OPENAI_API_KEY),
     tradingMode: process.env.TRADING_MODE || 'disabled',
@@ -266,23 +272,34 @@ async function route(request, response) {
     return;
   }
 
-  if (method === 'POST' && url.pathname === '/api/auth/login') {
-    if (!rateLimit(request, response, 'login', 10)) return;
-    if (!authConfigured()) {
-      sendJson(response, 503, { error: 'APP_USERNAME and APP_PASSWORD are not configured. Copy .env.example to .env first.' });
-      return;
+  if (method === 'POST' && url.pathname === '/api/auth/nonce') {
+    if (!rateLimit(request, response, 'wallet-auth', 20)) return;
+    try {
+      const body = await bodyJson(request);
+      const challenge = createWalletChallenge({ origin: requestOrigin(request), address: body.address, chainId: body.chainId });
+      nonces.set(challenge.nonce, { ...challenge, consumed: false });
+      sendJson(response, 200, { message: challenge.message, nonce: challenge.nonce, expiresAt: challenge.expiresAt });
+    } catch (error) { sendJson(response, 400, { error: cleanError(error) }); }
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/api/auth/wallet') {
+    if (!rateLimit(request, response, 'wallet-auth', 20)) return;
+    try {
+      const body = await bodyJson(request);
+      const record = nonces.get(String(body.nonce || ''));
+      const verified = verifyWalletChallenge({ record, address: body.address, chainId: body.chainId, message: body.message, signature: body.signature });
+      record.consumed = true;
+      nonces.delete(String(body.nonce));
+      const token = randomToken(32);
+      const csrf = randomToken(24);
+      sessions.set(token, { id: token.slice(0, 12), address: verified.address, chainId: verified.chainId, csrf, expiresAt: Date.now() + SESSION_TTL_MS });
+      logEvent('wallet_login_success', { address: verified.address, chainId: verified.chainId });
+      sendJson(response, 200, { ok: true, address: verified.address, chainId: verified.chainId }, { 'Set-Cookie': [sessionCookie(token, Math.floor(SESSION_TTL_MS / 1000)), csrfCookie(csrf, Math.floor(SESSION_TTL_MS / 1000))] });
+    } catch (error) {
+      logEvent('wallet_login_failed', { error: cleanError(error) });
+      sendJson(response, 401, { error: cleanError(error) });
     }
-    const body = await bodyJson(request);
-    if (!timingSafeEqualText(body.username, process.env.APP_USERNAME) || !timingSafeEqualText(body.password, process.env.APP_PASSWORD)) {
-      logEvent('login_failed');
-      sendJson(response, 401, { error: 'Invalid credentials.' });
-      return;
-    }
-    const token = randomToken(32);
-    const csrf = randomToken(24);
-    sessions.set(token, { id: token.slice(0, 12), username: process.env.APP_USERNAME, csrf, expiresAt: Date.now() + SESSION_TTL_MS });
-    logEvent('login_success', { username: process.env.APP_USERNAME });
-    sendJson(response, 200, { ok: true }, { 'Set-Cookie': [sessionCookie(token, Math.floor(SESSION_TTL_MS / 1000)), csrfCookie(csrf, Math.floor(SESSION_TTL_MS / 1000))] });
     return;
   }
 
@@ -434,8 +451,8 @@ const server = http.createServer(async (request, response) => {
   catch (error) { sendJson(response, error.status || 500, { error: cleanError(error) }); }
 });
 
-server.listen(PORT, HOST, () => {
+  server.listen(PORT, HOST, () => {
   console.log(`Vector trading cockpit listening on http://${HOST}:${PORT}`);
   console.log(`Live execution: ${isLiveTradingEnabled(config, exchange.configured) ? 'ENABLED' : 'disabled'}`);
-  if (!authConfigured() && authRequired()) console.warn('Set APP_USERNAME and APP_PASSWORD before using protected controls.');
+  if (authRequired()) console.log('Wallet authentication is required for protected controls.');
 });

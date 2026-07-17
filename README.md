@@ -5,7 +5,7 @@ Vector is a small, dependency-free full-stack application for live crypto market
 ## What is included
 
 - Live Binance futures candles, mark price, 24h statistics and funding data.
-- Browser-side injected EVM wallet connection using `window.ethereum`; no private keys are requested or stored.
+- Wallet-first authentication using an EIP-4361-style, domain-bound one-time signature challenge; no passwords, private keys, or seed phrases are requested or stored.
 - Server-side Binance HMAC request signing for account, positions, leverage, order preview, market orders and cancellation of open orders.
 - Hard risk controls: symbol allowlist, leverage cap, notional cap, daily loss cap, minimum AI confidence, stop-loss requirement and a kill switch.
 - Optional AI strategy endpoint using structured JSON output. AI output is only a proposal unless `AI_AUTO_EXECUTE=true`, and the hard risk engine runs again before any order.
@@ -15,15 +15,16 @@ Vector is a small, dependency-free full-stack application for live crypto market
 ## Run locally
 
 1. Copy `.env.example` to `.env`.
-2. Set `APP_PASSWORD` to a long random value. For live execution, create a Binance API key with only the permissions you need, disable withdrawals, restrict the key by IP, then set `BINANCE_API_KEY` and `BINANCE_API_SECRET`.
-3. Start with `TRADING_MODE=disabled` or `TRADING_MODE=testnet`. Only set `TRADING_MODE=live` and `LIVE_TRADING_ACK=YES` after reviewing the code and the exchange account.
-4. Run `npm start` and open `http://localhost:4173`.
+2. Open the app with an injected EVM wallet such as MetaMask, Coinbase Wallet, or Rabby. The wallet signs a human-readable login message; it does not send a transaction.
+3. For live execution, create a Binance API key with only the permissions you need, disable withdrawals, restrict the key by IP, then set `BINANCE_API_KEY` and `BINANCE_API_SECRET`.
+4. Start with `TRADING_MODE=disabled` or `TRADING_MODE=testnet`. Only set `TRADING_MODE=live` and `LIVE_TRADING_ACK=YES` after reviewing the code and the exchange account.
+5. Run `npm start` and open `http://localhost:4173`.
 
 The app requires no npm dependencies. Node 20+ is required for the built-in `fetch`; Node 22+ is recommended.
 
 ## Production hardening still required
 
-This is an application foundation, not a promise that live-money trading is safe. Before production use, add TLS termination, a real identity provider or SIWE verification, a persistent encrypted audit store, centralized secrets management/KMS, CSRF tokens for cookie-authenticated mutations, rate limiting, an exchange user-data stream, monitoring/alerting, incident response, and an independent security/compliance review. Keep the live API key on a dedicated account with the smallest possible permissions.
+This is an application foundation, not a promise that live-money trading is safe. Before production use, add TLS termination, an audited SIWE library/parser, a persistent encrypted audit store, centralized secrets management/KMS, rate limiting, an exchange user-data stream, monitoring/alerting, incident response, and an independent security/compliance review. Keep the live API key on a dedicated account with the smallest possible permissions.
 
 The application does not invent prices, balances, fills or performance. If the upstream exchange or AI provider is unavailable, it shows an unavailable state and does not substitute mock values.
 

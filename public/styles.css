@@ -141,6 +141,11 @@ td:first-child { color: var(--text); font-weight: 800; }
 .login-card .brand { margin-bottom: 48px; }
 .login-card h2 { font-size: 25px; margin-bottom: 12px; }
 .login-card .panel-note { margin-bottom: 22px; }
+.wallet-login-points { display: grid; gap: 9px; margin: 18px 0 20px; padding: 14px; border: 1px solid rgba(42,52,54,.8); border-radius: 11px; background: rgba(255,255,255,.02); }
+.wallet-login-points div { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 11px; }
+.point-icon { width: 17px; height: 17px; display: grid; place-items: center; border-radius: 99px; color: #11160c; background: var(--lime); font-size: 11px; font-weight: 900; }
+.wallet-login-button { width: 100%; min-height: 46px; }
+.wallet-login-foot { color: var(--faint); font-size: 10px; line-height: 1.5; margin: 14px 0 0; text-align: center; }
 .form-error { min-height: 16px; color: var(--red); font-size: 11px; }
 @media (max-width: 1000px) { .metric-grid { grid-template-columns: 1fr 1fr; } .dashboard-grid, .lower-grid, .bottom-grid { grid-template-columns: 1fr; } .chart-panel { min-height: 400px; } }
 @media (max-width: 650px) { .topbar { padding: 0 16px; } .topbar .brand small, #walletButton { display: none; } .content { width: min(100% - 28px, 1440px); padding-top: 34px; } .hero-row { display: block; } .system-card { margin-top: 20px; } .metric-grid { grid-template-columns: 1fr 1fr; } .metric-card { padding: 14px; min-height: 102px; } .metric-value { font-size: 25px; } .chart-wrap { height: 280px; } .panel { padding: 17px; } .footer { display: block; line-height: 1.8; } }
